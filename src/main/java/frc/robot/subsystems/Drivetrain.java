@@ -104,7 +104,7 @@ public class Drivetrain extends SubsystemBase {
   }
 
   public ChassisSpeeds getCurrentSpeeds() {
-    return ;
+    return m_kinematics.toChassisSpeeds();
   } 
 
   public void drive(ChassisSpeeds chassisSpeeds) {
