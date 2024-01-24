@@ -22,14 +22,16 @@ import edu.wpi.first.wpilibj.Encoder;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
 import edu.wpi.first.wpilibj.motorcontrol.Spark;
 import edu.wpi.first.wpilibj.romi.RomiGyro;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public class Drivetrain extends SubsystemBase {
   private static final double kCountsPerRevolution = 1440.0;
-  private static final double kWheelDiameterInch = 2.75591; // 70 mm
+  private static final double kWheelDiameterInch = 2.75591/12.0; // 70 mm
   private static final double kTrackWidth = 5.551/12.0;
-  private double m_rightSideInvertMultiplier = -1.0;
+  // This is inverted from the original version.
+  private double m_rightSideInvertMultiplier = 1.0;
 
   // The Romi has the left and right motors set to
   // PWM channels 0 and 1 respectively
@@ -62,8 +64,14 @@ public class Drivetrain extends SubsystemBase {
   private final PIDController m_leftPIDController = new PIDController(1.75, 0, 0);
   private final PIDController m_rightPIDController = new PIDController(1.75, 0, 0);
 
+  private final Field2d m_fieldSim = new Field2d();
+
+  private int m_printDebug;
+
   /** Creates a new Drivetrain. */
   public Drivetrain() {
+    m_diffDrive.setSafetyEnabled(false);
+
     SendableRegistry.addChild(m_diffDrive, m_leftMotor);
     SendableRegistry.addChild(m_diffDrive, m_rightMotor);
 
@@ -76,6 +84,7 @@ public class Drivetrain extends SubsystemBase {
     m_leftEncoder.setDistancePerPulse((Math.PI * kWheelDiameterInch) / kCountsPerRevolution);
     m_rightEncoder.setDistancePerPulse((Math.PI * kWheelDiameterInch) / kCountsPerRevolution);
     resetEncoders();
+    resetGyro();
 
     m_odometry =
         new DifferentialDriveOdometry(
@@ -101,10 +110,13 @@ public class Drivetrain extends SubsystemBase {
             },
             this // Reference to this subsystem to set requirements
     );
+
+    SmartDashboard.putData("Field", m_fieldSim);
   }
 
   public ChassisSpeeds getCurrentSpeeds() {
-    return ;
+    var wheelSpeeds = new DifferentialDriveWheelSpeeds(m_leftEncoder.getRate(), m_rightEncoder.getRate());
+    return m_kinematics.toChassisSpeeds(wheelSpeeds);
   } 
 
   public void drive(ChassisSpeeds chassisSpeeds) {
@@ -112,6 +124,9 @@ public class Drivetrain extends SubsystemBase {
   }
 
   public void setSpeeds(DifferentialDriveWheelSpeeds speeds) {
+
+
+
     var leftFeedforward = m_feedforward.calculate(speeds.leftMetersPerSecond);
     var rightFeedforward = m_feedforward.calculate(speeds.rightMetersPerSecond);
     var leftEncoderRate = m_leftEncoder.getRate();
@@ -121,8 +136,17 @@ public class Drivetrain extends SubsystemBase {
     double rightOutput =
         m_rightPIDController.calculate(rightEncoderRate, speeds.rightMetersPerSecond);
 
+    var totalLeftOut = leftOutput + leftFeedforward;
+    var totalRightOut = m_rightSideInvertMultiplier * (rightOutput + rightFeedforward);
+
+    SmartDashboard.putNumber("Total setSpeeds Left", totalLeftOut);
+    SmartDashboard.putNumber("Total setSpeeds Right", totalRightOut);
+
     m_leftMotor.setVoltage(leftOutput + leftFeedforward);
     m_rightMotor.setVoltage(m_rightSideInvertMultiplier * (rightOutput + rightFeedforward));
+
+    // m_leftMotor.setVoltage(12);
+    // m_rightMotor.setVoltage(12);
   }
 
     /**
@@ -251,8 +275,33 @@ public class Drivetrain extends SubsystemBase {
     m_gyro.reset();
   }
 
+    /** Update robot odometry. */
+  public void updateOdometry() {
+    var rotation2d = Rotation2d.fromDegrees(m_gyro.getAngle());
+    m_odometry.update(rotation2d, m_leftEncoder.getDistance(), m_rightEncoder.getDistance());
+    
+    if (++m_printDebug >= 1) {
+      m_printDebug = 0;
+      SmartDashboard.putNumber("Left Encoder Dist", m_leftEncoder.getDistance());
+      SmartDashboard.putNumber("Right Encoder Dist", m_rightEncoder.getDistance());
+      SmartDashboard.putNumber("Left Encoder Rate", m_leftEncoder.getRate());
+      SmartDashboard.putNumber("Right Encoder Rate", m_rightEncoder.getRate());
+      SmartDashboard.putNumber("Gryo Degrees", rotation2d.getDegrees());
+
+      var translation = getPose().getTranslation();
+      var x = translation.getX();
+      var y = translation.getY();
+      var rotation = getPose().getRotation().getDegrees();
+      SmartDashboard.putNumber("Pose X", x);
+      SmartDashboard.putNumber("Pose Y", y);
+      SmartDashboard.putNumber("Pose Degrees", rotation);
+    }
+  }
+
   @Override
   public void periodic() {
     // This method will be called once per scheduler run
+    updateOdometry();
+    m_fieldSim.setRobotPose(m_odometry.getPoseMeters());
   }
 }
